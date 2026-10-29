@@ -233,7 +233,7 @@ async function fetchTop15BrokerConcentration(
     const chip10dLots = Math.round(Number(lastChip10[1]));
 
     // 找到 Volume 陣列中對齊 chip5 最新結算日期的索引 (若盤中尚未結算當日分點，自動對齊至前一個已結算交易日)
-    let alignIdx = volArr.findIndex((v) => v[0] === targetTs);
+    let alignIdx = volArr.findIndex((v) => Math.abs(v[0] - targetTs) < 43200_000);
     if (alignIdx < 0) {
       alignIdx = volArr.length - 1;
     }
@@ -671,6 +671,8 @@ function evaluateMultiTimeframeSupport(dailyBars: Bar[]): SupportCheckResult {
   checkLevel("月", "布林中軌", mStats.bbMiddle, 5.0, 15);
   checkLevel("月", "布林下軌", mStats.bbLower, 5.0, 13);
 
+  const hasLineSupport = matchedLabels.length > 0;
+
   const dailyBandwidthPct = dStats.bandwidthPct !== null ? Number(dStats.bandwidthPct.toFixed(1)) : 99;
   const isSqueeze = dailyBandwidthPct <= 15.0;
   if (isSqueeze) {
@@ -686,14 +688,10 @@ function evaluateMultiTimeframeSupport(dailyBars: Bar[]): SupportCheckResult {
   if (volumeRatio5d >= 1.5 && dailyBars[n - 1].close > dailyBars[n - 2].close) {
     rawScore += 6;
     matchedLabels.push(`帶量點火(${volumeRatio5d}倍量)`);
-  } else if (volumeRatio5d <= 0.85 && matchedLabels.length > 0) {
+  } else if (volumeRatio5d <= 0.85 && hasLineSupport) {
     rawScore += 4;
     matchedLabels.push(`量縮回測支撐(${volumeRatio5d}倍量)`);
   }
-
-  const hasLineSupport = matchedLabels.some(
-    (l) => l.startsWith("日") || l.startsWith("週") || l.startsWith("月")
-  );
 
   return {
     matched: hasLineSupport,
@@ -749,24 +747,40 @@ async function fetchAndEvaluateYahooStock(
     return { passed: false } as FullStockEvaluation;
   }
 
-  const dailyBars: Bar[] = [];
+  const dailyBarsByDate = new Map<string, Bar>();
   for (let i = 0; i < quote.close.length; i++) {
     const c = quote.close[i];
     const o = quote.open[i];
     const h = quote.high[i];
     const l = quote.low[i];
     const v = quote.volume[i];
-    if (c !== null && c !== undefined && h !== null && l !== null && timestamps[i]) {
-      dailyBars.push({
-        time: Number(timestamps[i]),
+    if (
+      c !== null &&
+      c !== undefined &&
+      Number(c) > 0 &&
+      h !== null &&
+      l !== null &&
+      v !== null &&
+      v !== undefined &&
+      Number(v) > 0 &&
+      timestamps[i]
+    ) {
+      const ts = Number(timestamps[i]);
+      const dt = new Date((ts + 8 * 3600) * 1000);
+      const dayKey = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(
+        dt.getUTCDate()
+      ).padStart(2, "0")}`;
+      dailyBarsByDate.set(dayKey, {
+        time: ts,
         open: Number(o ?? c),
         high: Number(h),
         low: Number(l),
         close: Number(c),
-        volume: Number(v || 0),
+        volume: Number(v),
       });
     }
   }
+  const dailyBars: Bar[] = Array.from(dailyBarsByDate.values());
 
   const n = dailyBars.length;
   if (n < 35) return { passed: false } as FullStockEvaluation;
@@ -1027,10 +1041,10 @@ async function fetchAndEvaluateYahooStock(
     rawChipScore += 4;
   }
 
-  // 4) TDCC 400張大戶 vs 100張散戶 (最高 6 分)
+  // 4) TDCC 400張大戶 (最高 6 分)
   if (cand.major400Pct >= 65.0 && cand.retail100Pct <= 25.0) {
     rawChipScore += 6;
-    chipReasons.push(`大戶鎖碼(${cand.major400Pct}%/散戶${cand.retail100Pct}%)`);
+    chipReasons.push(`400張大戶鎖碼(${cand.major400Pct}%)`);
   } else if (cand.major400Pct >= 50.0) {
     rawChipScore += 4;
     chipReasons.push(`400張大戶(${cand.major400Pct}%)`);
@@ -1217,9 +1231,21 @@ Deno.serve(async (req) => {
     const topRecs = recommendations.slice(0, 10);
     const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(2));
 
-    // 4. 寫入 Supabase 資料表
+    // 4. 寫入 Supabase 資料表 (先移除同日同場次的舊批次，避免殘留孤兒紀錄)
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     let runId: string | null = null;
+
+    await supabase
+      .from("stock_recommendations")
+      .delete()
+      .eq("run_date", taipeiDate)
+      .eq("session_type", sessionType);
+
+    await supabase
+      .from("screening_runs")
+      .delete()
+      .eq("run_date", taipeiDate)
+      .eq("session_type", sessionType);
 
     const { data: runData, error: runErr } = await supabase
       .from("screening_runs")
@@ -1241,12 +1267,6 @@ Deno.serve(async (req) => {
     }
 
     if (topRecs.length > 0) {
-      await supabase
-        .from("stock_recommendations")
-        .delete()
-        .eq("run_date", taipeiDate)
-        .eq("session_type", sessionType);
-
       const rowsWithRunId = topRecs.map((r) => ({ ...r, run_id: runId }));
       const { error: recErr } = await supabase
         .from("stock_recommendations")

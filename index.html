@@ -101,10 +101,11 @@
       </div>
       <div class="glass-card rounded-xl p-4">
         <div class="text-xs text-gray-400">雙軌型態篩選</div>
-        <div class="flex items-center gap-1.5 mt-1.5">
+        <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
           <button onclick="setFilter('ALL')" id="filter-ALL" class="filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium">全部</button>
           <button onclick="setFilter('🔥支撐起漲共振')" id="filter-🔥支撐起漲共振" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">🔥共振</button>
           <button onclick="setFilter('💎隱藏潛伏回測')" id="filter-💎隱藏潛伏回測" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">💎潛伏</button>
+          <button onclick="setFilter('🚀動能突破型')" id="filter-🚀動能突破型" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">🚀突破</button>
         </div>
       </div>
     </section>
@@ -170,6 +171,7 @@
 
         const selector = document.getElementById("runSelector");
         selector.innerHTML = "";
+        runsMap = {};
 
         // 以 (run_date + session_type) 去重，保留最新一筆
         const seenKeys = new Set();
@@ -265,8 +267,11 @@
 
         const badgeStyle = trackBadge.includes("共振")
           ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+          : trackBadge.includes("突破")
+          ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
           : "bg-amber-500/15 text-amber-300 border-amber-500/30";
 
+        const rankNum = allRecommendations.indexOf(r) + 1 || (idx + 1);
         const yahooUrl = `https://tw.stock.yahoo.com/quote/${r.stock_id}.${r.market === "TWSE" ? "TW" : "TWO"}`;
         const fStreakHtml = fStreak > 0 ? `<span class="text-[11px] text-amber-400 ml-1">(連${fStreak})</span>` : "";
         const tStreakHtml = tStreak > 0 ? `<span class="text-[11px] text-amber-400 ml-1">(連${tStreak})</span>` : "";
@@ -282,7 +287,7 @@
               <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2.5">
                   <span class="w-7 h-7 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center font-mono text-xs font-bold text-gray-300">
-                    #${idx + 1}
+                    #${rankNum}
                   </span>
                   <div>
                     <div class="flex items-center gap-2">
