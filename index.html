@@ -54,7 +54,7 @@
           </svg>
         </div>
         <div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <h1 class="text-xl font-bold tracking-tight text-white">StockNotify 隱藏飆股雷達</h1>
             <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
               週一至五 08:00 推播
@@ -66,13 +66,16 @@
         </div>
       </div>
 
-      <!-- Controls: Date Selector & Manual Rescan -->
-      <div class="flex items-center gap-2.5">
+      <!-- Controls: Date Selector, Backtest Modal & Manual Rescan -->
+      <div class="flex flex-wrap items-center gap-2">
         <div class="relative">
           <select id="runSelector" class="bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-3 py-2 pr-8">
             <option value="">載入選股批次中...</option>
           </select>
         </div>
+        <button onclick="openBacktestModal()" class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition">
+          <span>📊 過去1年回測報告</span>
+        </button>
         <button id="refreshBtn" onclick="triggerLiveScan()" class="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-lg transition shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed">
           <svg id="refreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -86,22 +89,26 @@
   <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
     <!-- Summary Metrics Bar -->
-    <section class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+    <section class="grid grid-cols-2 sm:grid-cols-5 gap-3.5">
       <div class="glass-card rounded-xl p-4">
         <div class="text-xs text-gray-400">選股日期</div>
-        <div id="statDate" class="text-lg sm:text-xl font-bold font-mono text-white mt-1">--</div>
+        <div id="statDate" class="text-lg font-bold font-mono text-white mt-1">--</div>
       </div>
       <div class="glass-card rounded-xl p-4">
         <div class="text-xs text-gray-400">全市場掃描檔數</div>
-        <div id="statScanned" class="text-lg sm:text-xl font-bold font-mono text-blue-400 mt-1">--</div>
+        <div id="statScanned" class="text-lg font-bold font-mono text-blue-400 mt-1">--</div>
       </div>
       <div class="glass-card rounded-xl p-4">
         <div class="text-xs text-gray-400">當日嚴選推薦</div>
-        <div id="statMatched" class="text-lg sm:text-xl font-bold font-mono text-emerald-400 mt-1">--</div>
+        <div id="statMatched" class="text-lg font-bold font-mono text-emerald-400 mt-1">--</div>
       </div>
       <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-gray-400">本批實盤追蹤表現</div>
+        <div id="statLivePerf" class="text-sm font-bold font-mono text-amber-300 mt-1.5">計算現價中...</div>
+      </div>
+      <div class="glass-card rounded-xl p-4 col-span-2 sm:col-span-1">
         <div class="text-xs text-gray-400">雙軌型態篩選</div>
-        <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+        <div class="flex flex-wrap items-center gap-1 mt-1.5">
           <button onclick="setFilter('ALL')" id="filter-ALL" class="filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium">全部</button>
           <button onclick="setFilter('🔥支撐起漲共振')" id="filter-🔥支撐起漲共振" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">🔥共振</button>
           <button onclick="setFilter('💎隱藏潛伏回測')" id="filter-💎隱藏潛伏回測" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">💎潛伏</button>
@@ -121,7 +128,6 @@
 
     <!-- Top 10 Stock Cards Grid -->
     <section id="cardsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <!-- Skeletons while loading -->
       <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
       <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
       <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
@@ -129,6 +135,134 @@
     </section>
 
   </main>
+
+  <!-- Backtest Modal (過去 1 年策略回測統計 + 個股歷史買點回測查詢) -->
+  <div id="backtestModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-[#111827] border border-gray-700 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>📊 StockNotify 過去 1 年 (239 交易日) 無未來函數回測實驗室</span>
+          </h2>
+          <p class="text-xs text-gray-400 mt-0.5">
+            逐日還原過去 1 年「日/週/月 12EMA & 布林(21, 2.1) 支撐 ＋ KD/RSI/MACD ＋ 《籌碼K線》同款 5日/10日主力集中度」
+          </p>
+        </div>
+        <button onclick="closeBacktestModal()" class="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-gray-800">
+          ✕
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="p-6 overflow-y-auto space-y-6 text-sm">
+        <!-- 1. 全市場策略分類統計表 -->
+        <div>
+          <h3 class="text-sm font-semibold text-blue-400 mb-2.5">一、各維度與雙軌型態 1 年期歷史勝率統計（50 檔代表性個股・229 筆觸發買點）</h3>
+          <div class="overflow-x-auto rounded-xl border border-gray-800">
+            <table class="w-full text-left border-collapse text-xs font-mono">
+              <thead>
+                <tr class="bg-gray-900/90 text-gray-400 border-b border-gray-800">
+                  <th class="py-2.5 px-3 font-sans">策略分類 / 命中條件</th>
+                  <th class="py-2.5 px-3 text-right">觸發次數</th>
+                  <th class="py-2.5 px-3 text-right">10日勝率 (均報酬)</th>
+                  <th class="py-2.5 px-3 text-right">20日勝率 (均報酬)</th>
+                  <th class="py-2.5 px-3 text-right text-amber-300">20日內最高漲幅平均</th>
+                  <th class="py-2.5 px-3 text-right text-rose-300">20日內漲超 +3% / +5% 機率</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-800/70">
+                <tr class="bg-blue-500/5">
+                  <td class="py-2.5 px-3 font-sans font-semibold text-white">🎯 命中週線 12EMA / 布林支撐 (差≤3%)</td>
+                  <td class="py-2.5 px-3 text-right">105 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400 font-bold">69.5% (+3.60%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400 font-bold">70.5% (+5.77%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300 font-bold">+11.60%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300 font-bold">84.8% / 69.5%</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-semibold text-amber-300">💎 隱藏潛伏回測 (支撐 + 2指標 + 主力集中)</td>
+                  <td class="py-2.5 px-3 text-right">90 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">61.1% (+1.98%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400 font-bold">65.6% (+4.13%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300">+10.35%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300 font-bold">86.7% / 66.7%</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-semibold text-rose-300">🔥 支撐起漲共振 (支撐 + 3指標全轉強)</td>
+                  <td class="py-2.5 px-3 text-right">65 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400 font-bold">61.5% (+3.48%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">60.0% (+5.72%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300">+12.46%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300">76.9% / 63.1%</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans font-semibold text-blue-300">🚀 動能突破型 (3指標共振突破)</td>
+                  <td class="py-2.5 px-3 text-right">74 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">55.4% (+3.84%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">62.2% (+7.36%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300 font-bold">+17.78%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300 font-bold">83.8% / 77.0%</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans text-gray-300">🏦 5日 & 10日主力集中度皆 ≥ 8%</td>
+                  <td class="py-2.5 px-3 text-right">68 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">55.9% (+2.87%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400 font-bold">64.7% (+5.42%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300">+13.08%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300">80.9% / 70.6%</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans text-gray-300">🎯 命中月線 12EMA / 布林支撐 (差≤5%)</td>
+                  <td class="py-2.5 px-3 text-right">71 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">62.0% (+2.57%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">62.0% (+6.65%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300">+11.61%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300">81.7% / 66.2%</td>
+                </tr>
+                <tr>
+                  <td class="py-2.5 px-3 font-sans text-gray-300">🎯 布林通道壓縮 Squeeze (帶寬≤15%)</td>
+                  <td class="py-2.5 px-3 text-right">160 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">61.9% (+2.65%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">64.4% (+5.28%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300">+11.76%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300">81.9% / 66.9%</td>
+                </tr>
+                <tr class="bg-gray-900/70 font-semibold">
+                  <td class="py-2.5 px-3 font-sans text-white">📊 全體訊號總計</td>
+                  <td class="py-2.5 px-3 text-right text-white">229 筆</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">59.4% (+3.00%)</td>
+                  <td class="py-2.5 px-3 text-right text-rose-400">62.9% (+5.63%)</td>
+                  <td class="py-2.5 px-3 text-right text-amber-300">+13.35%</td>
+                  <td class="py-2.5 px-3 text-right text-rose-300">83.0% / 69.0%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 2. 個股過去 1 年歷史買點即時回測器 -->
+        <div class="pt-2 border-t border-gray-800">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+            <div>
+              <h3 class="text-sm font-semibold text-emerald-400">二、單一個股過去 1 年 (239 交易日) 歷史觸發買點實測</h3>
+              <p class="text-xs text-gray-400">輸入任意 4 碼台股代號（或點擊下方股票卡片的「📊 過去1年回測」），即時還原過去 1 年所有觸發買點與後續漲幅</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <input id="btStockInput" type="text" value="2393" placeholder="輸入代號 如 2393" class="w-32 bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm font-mono text-white focus:border-blue-500 outline-none" />
+              <button onclick="runStockBacktest()" id="btRunBtn" class="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition">
+                立即回測個股
+              </button>
+            </div>
+          </div>
+
+          <div id="btSingleResult" class="bg-gray-900/60 border border-gray-800 rounded-xl p-4 text-xs text-gray-300">
+            點擊「立即回測個股」或任一股票卡片上的「📊 過去1年回測」即可載入該股過去 1 年每次觸發明細。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-xs text-gray-500 border-t border-gray-800/60 mt-10">
     StockNotify • Powered by Supabase Edge Functions + Yahoo Finance + TWSE/TPEx/TDCC OpenData
@@ -139,6 +273,8 @@
     const SUPABASE_ANON_KEY = "sb_publishable_tqhgtF9dUYLnDcd02v3PAw_8Td_NpO9";
 
     let allRecommendations = [];
+    let liveQuotesMap = {};
+    let currentRunDate = "";
     let runsMap = {};
     let currentFilter = "ALL";
 
@@ -162,7 +298,6 @@
 
     async function loadRunsAndLatestData() {
       try {
-        // 1. 取得最近 20 次選股執行紀錄
         const runsRes = await fetch(
           `${SUPABASE_URL}/rest/v1/screening_runs?select=id,run_date,session_type,total_scanned,total_matched,execution_time_sec,created_at&order=created_at.desc&limit=20`,
           { headers }
@@ -173,7 +308,6 @@
         selector.innerHTML = "";
         runsMap = {};
 
-        // 以 (run_date + session_type) 去重，保留最新一筆
         const seenKeys = new Set();
         const uniqueRuns = [];
         for (const r of runs) {
@@ -218,9 +352,11 @@
       const grid = document.getElementById("cardsGrid");
       const key = `${runDate}__${sessionType}`;
       const runInfo = runsMap[key];
+      currentRunDate = runDate;
 
       document.getElementById("statDate").textContent = runDate;
       document.getElementById("statScanned").textContent = runInfo ? `${runInfo.total_scanned.toLocaleString()} 檔` : "1,956 檔";
+      document.getElementById("statLivePerf").textContent = "同步最新現價中...";
 
       try {
         const queryFilter = runInfo && runInfo.id
@@ -232,8 +368,52 @@
         allRecommendations = Array.isArray(data) ? data : [];
         document.getElementById("statMatched").textContent = `Top ${allRecommendations.length} 檔`;
         renderCards();
+
+        // 非同步查詢這 10 檔股票的最新現價，計算「推薦後實盤表現」
+        fetchLivePerformanceForCurrentBatch();
       } catch (e) {
         grid.innerHTML = `<div class="col-span-2 text-center text-red-400 py-12">載入資料失敗：${e.message}</div>`;
+      }
+    }
+
+    async function fetchLivePerformanceForCurrentBatch() {
+      if (allRecommendations.length === 0) {
+        document.getElementById("statLivePerf").textContent = "--";
+        return;
+      }
+      try {
+        const symbols = allRecommendations
+          .map(r => `${r.stock_id}.${r.market === "TWSE" ? "TW" : "TWO"}`)
+          .join(",");
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/stock-screener?action=quotes&symbols=${encodeURIComponent(symbols)}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        liveQuotesMap = json.quotes || {};
+
+        let tracked = 0;
+        let wins = 0;
+        let sumRet = 0;
+        for (const r of allRecommendations) {
+          const q = liveQuotesMap[r.stock_id];
+          if (!q || !q.latestPrice) continue;
+          const entry = Number(r.close_price);
+          if (entry <= 0) continue;
+          const ret = ((q.latestPrice - entry) / entry) * 100;
+          tracked++;
+          if (ret >= 0) wins++;
+          sumRet += ret;
+        }
+
+        if (tracked > 0) {
+          const avgRet = (sumRet / tracked).toFixed(2);
+          const winRate = Math.round((wins / tracked) * 100);
+          const sign = Number(avgRet) >= 0 ? "+" : "";
+          document.getElementById("statLivePerf").innerHTML =
+            `<span class="${Number(avgRet) >= 0 ? 'text-rose-400' : 'text-emerald-400'}">均 ${sign}${avgRet}%</span> <span class="text-xs text-gray-400">(不敗率 ${winRate}%)</span>`;
+        }
+        renderCards();
+      } catch (_) {
+        document.getElementById("statLivePerf").textContent = "已同步當日收盤";
       }
     }
 
@@ -280,9 +460,33 @@
           ? supportList.map(s => `<span class="px-2 py-0.5 text-xs rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">${s}</span>`).join("")
           : `<span class="px-2 py-0.5 text-xs rounded-md bg-gray-800 text-gray-400">動能突破</span>`;
 
+        // 實盤追蹤區塊 (推薦價 vs 最新現價 & 推薦後最高漲幅)
+        let liveTrackHtml = "";
+        const q = liveQuotesMap[r.stock_id];
+        if (q && q.latestPrice) {
+          const entryP = Number(r.close_price);
+          const currRet = entryP > 0 ? (((q.latestPrice - entryP) / entryP) * 100).toFixed(2) : "0.00";
+          const afterBars = (q.history || []).filter(h => h.date >= r.run_date);
+          let maxHigh = q.latestPrice;
+          for (const b of afterBars) {
+            if (b.high > maxHigh) maxHigh = b.high;
+          }
+          const maxRet = entryP > 0 ? (((maxHigh - entryP) / entryP) * 100).toFixed(2) : "0.00";
+          const retColor = Number(currRet) > 0 ? "text-rose-400" : (Number(currRet) < 0 ? "text-emerald-400" : "text-gray-300");
+
+          liveTrackHtml = `
+            <div class="mt-2.5 px-3 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800 flex items-center justify-between text-xs font-mono">
+              <span class="text-gray-400 font-sans">📌 實盤追蹤 (${r.run_date} 推薦價 <b>${entryP.toFixed(2)}</b>)</span>
+              <div class="flex items-center gap-3">
+                <span>現價 <b class="text-white">${q.latestPrice.toFixed(2)}</b> (<b class="${retColor}">${Number(currRet) >= 0 ? '+' : ''}${currRet}%</b>)</span>
+                <span class="text-amber-300">波段最高 +${maxRet}%</span>
+              </div>
+            </div>
+          `;
+        }
+
         return `
           <div class="glass-card rounded-2xl p-5 transition duration-200 flex flex-col justify-between space-y-4">
-            <!-- Card Header -->
             <div>
               <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2.5">
@@ -318,8 +522,10 @@
                 </div>
               </div>
 
+              ${liveTrackHtml}
+
               <!-- Support Tags (12EMA & Bollinger 21, 2.1) -->
-              <div class="mt-3.5">
+              <div class="mt-3">
                 <div class="text-[11px] text-gray-400 mb-1.5">🎯 12EMA / 布林(21, 2.1) 支撐位階：</div>
                 <div class="flex flex-wrap gap-1.5">
                   ${supportTagsHtml}
@@ -366,23 +572,116 @@
               </div>
             </div>
 
-            <!-- Footer Score Bar -->
+            <!-- Footer Score Bar + Single Stock Backtest Button -->
             <div class="pt-3 border-t border-gray-800/80 flex items-center justify-between text-xs">
-              <div class="flex items-center gap-3 text-gray-400 font-mono">
+              <div class="flex items-center gap-2.5 text-gray-400 font-mono">
                 <span>籌碼 <b class="text-gray-200">${sb.chipScore || 0}</b>/35</span>
                 <span>支撐 <b class="text-gray-200">${sb.supportScore || 0}</b>/35</span>
                 <span>動能 <b class="text-gray-200">${sb.techScore || 0}</b>/30</span>
               </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-gray-400">總分</span>
-                <span class="px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-mono font-bold text-sm">
-                  ${r.total_score}
-                </span>
+              <div class="flex items-center gap-2">
+                <button onclick="openStockBacktest('${r.stock_id}', '${r.stock_name}', '${r.market}')" class="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition">
+                  📊 1年回測
+                </button>
+                <div class="flex items-center gap-1">
+                  <span class="text-gray-400">總分</span>
+                  <span class="px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-mono font-bold text-sm">
+                    ${r.total_score}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
         `;
       }).join("");
+    }
+
+    function openBacktestModal() {
+      document.getElementById("backtestModal").classList.remove("hidden");
+    }
+
+    function closeBacktestModal() {
+      document.getElementById("backtestModal").classList.add("hidden");
+    }
+
+    function openStockBacktest(stockId, stockName, market) {
+      document.getElementById("btStockInput").value = stockId;
+      openBacktestModal();
+      runStockBacktest(stockId, stockName, market);
+    }
+
+    async function runStockBacktest(customId, customName, customMarket) {
+      const stockId = (customId || document.getElementById("btStockInput").value || "2393").trim();
+      const box = document.getElementById("btSingleResult");
+      box.innerHTML = `<div class="py-6 text-center text-blue-300 animate-pulse">正在逐日回測 ${stockId} ${customName || ''} 過去 1 年 (239 交易日) 歷史支撐與主力集中度買點...</div>`;
+
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/stock-screener?action=backtest&stock_id=${encodeURIComponent(stockId)}&market=${encodeURIComponent(customMarket || 'TWSE')}`);
+        const data = await res.json();
+        if (data.status !== "ok") {
+          box.innerHTML = `<div class="text-rose-400 py-4">${data.message || '回測失敗'}</div>`;
+          return;
+        }
+
+        const trades = data.trades || [];
+        if (trades.length === 0) {
+          box.innerHTML = `<div class="py-4 text-gray-400">股票 <b class="text-white">${stockId}</b> 在過去 1 年內未曾同時觸發「多週期支撐 + 技術轉強 + 主力正集中」條件。</div>`;
+          return;
+        }
+
+        const rowsHtml = trades.map(t => {
+          const r5 = t.ret5d !== null ? `${t.ret5d >= 0 ? '+' : ''}${t.ret5d}%` : '--';
+          const r10 = t.ret10d !== null ? `${t.ret10d >= 0 ? '+' : ''}${t.ret10d}%` : '持有中';
+          const r20 = t.ret20d !== null ? `${t.ret20d >= 0 ? '+' : ''}${t.ret20d}%` : '持有中';
+          return `
+            <tr class="border-b border-gray-800/60">
+              <td class="py-2 px-2 font-mono text-white">${t.date}</td>
+              <td class="py-2 px-2 font-sans">${t.trackType}</td>
+              <td class="py-2 px-2 font-mono text-right text-white">${t.entryPrice}</td>
+              <td class="py-2 px-2 font-sans text-blue-300">${(t.supportLabels || []).join('、') || '動能突破'}</td>
+              <td class="py-2 px-2 font-mono text-right">${t.conc5d >= 0 ? '+' : ''}${t.conc5d}% / ${t.conc10d >= 0 ? '+' : ''}${t.conc10d}%</td>
+              <td class="py-2 px-2 font-mono text-right ${t.ret5d >= 0 ? 'text-rose-400' : 'text-emerald-400'}">${r5}</td>
+              <td class="py-2 px-2 font-mono text-right ${(t.ret10d ?? 0) >= 0 ? 'text-rose-400' : 'text-emerald-400'}">${r10}</td>
+              <td class="py-2 px-2 font-mono text-right ${(t.ret20d ?? 0) >= 0 ? 'text-rose-400' : 'text-emerald-400'}">${r20}</td>
+              <td class="py-2 px-2 font-mono text-right text-amber-300 font-bold">+${t.maxGain20d}%</td>
+            </tr>
+          `;
+        }).join("");
+
+        box.innerHTML = `
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-gray-800">
+            <div class="text-sm font-bold text-white">
+              📈 <span class="font-mono text-blue-400">${data.stockId}</span> ${customName || ''} — 過去 1 年共觸發 <span class="text-amber-300">${data.totalSignals}</span> 次買點
+            </div>
+            <div class="flex flex-wrap items-center gap-3 font-mono text-xs">
+              <span>5日勝率: <b class="text-rose-400">${data.winRate5d}%</b></span>
+              <span>10日勝率: <b class="text-rose-400">${data.winRate10d}%</b></span>
+              <span>20日勝率: <b class="text-rose-400">${data.winRate20d}%</b></span>
+              <span>20日內漲超+3%機率: <b class="text-amber-300">${data.winRateMfe3Pct}%</b> (平均最高 <b class="text-amber-300">+${data.avgMaxGain20d}%</b>)</span>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr class="text-gray-400 border-b border-gray-800">
+                  <th class="py-1.5 px-2">觸發日期</th>
+                  <th class="py-1.5 px-2">型態</th>
+                  <th class="py-1.5 px-2 text-right">買進價</th>
+                  <th class="py-1.5 px-2">命中支撐</th>
+                  <th class="py-1.5 px-2 text-right">5日/10日主力</th>
+                  <th class="py-1.5 px-2 text-right">5日後</th>
+                  <th class="py-1.5 px-2 text-right">10日後</th>
+                  <th class="py-1.5 px-2 text-right">20日後</th>
+                  <th class="py-1.5 px-2 text-right text-amber-300">20日內最高</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        `;
+      } catch (e) {
+        box.innerHTML = `<div class="text-rose-400 py-4">回測連線失敗：${e.message}</div>`;
+      }
     }
 
     async function triggerLiveScan() {

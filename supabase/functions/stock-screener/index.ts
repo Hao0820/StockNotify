@@ -1132,12 +1132,388 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+/**
+ * 查詢多檔股票最新報價與近期日K (供前端計算「推薦後實盤累積漲跌幅」與「推薦後最高漲幅」)
+ */
+async function handleLiveQuotes(symbolsParam: string): Promise<Record<string, any>> {
+  const symbols = symbolsParam
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+
+  const out: Record<string, any> = {};
+  await Promise.allSettled(
+    symbols.map(async (sym) => {
+      const code = sym.split(".")[0];
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+        sym
+      )}?range=3mo&interval=1d`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const result = json?.chart?.result?.[0];
+      const ts: number[] = result?.timestamp || [];
+      const q = result?.indicators?.quote?.[0];
+      if (!q || !Array.isArray(q.close) || ts.length === 0) return;
+
+      const history: Array<{ date: string; close: number; high: number }> = [];
+      for (let i = 0; i < ts.length; i++) {
+        const c = q.close[i];
+        const h = q.high[i];
+        const v = q.volume[i];
+        if (c !== null && c !== undefined && Number(c) > 0 && v !== null && Number(v) > 0) {
+          const dt = new Date((Number(ts[i]) + 8 * 3600) * 1000);
+          const dStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(
+            2,
+            "0"
+          )}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+          history.push({
+            date: dStr,
+            close: Number(Number(c).toFixed(2)),
+            high: Number(Number(h ?? c).toFixed(2)),
+          });
+        }
+      }
+      if (history.length > 0) {
+        const last = history[history.length - 1];
+        out[code] = {
+          latestPrice: last.close,
+          latestDate: last.date,
+          history,
+        };
+      }
+    })
+  );
+  return out;
+}
+
+/**
+ * 單一個股過去 1 年 (239 交易日) 無未來函數歷史回測
+ */
+async function handleSingleStockBacktest(stockId: string, marketHint = "TWSE"): Promise<Record<string, any>> {
+  const cleanId = stockId.trim().replace(/[^0-9]/g, "");
+  const trySymbols =
+    marketHint === "TPEX" ? [`${cleanId}.TWO`, `${cleanId}.TW`] : [`${cleanId}.TW`, `${cleanId}.TWO`];
+
+  let dailyBars: Bar[] = [];
+  let usedSymbol = "";
+
+  for (const sym of trySymbols) {
+    const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      sym
+    )}?range=2y&interval=1d`;
+    const res = await fetch(yUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    });
+    if (!res.ok) continue;
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    const ts: number[] = result?.timestamp || [];
+    const q = result?.indicators?.quote?.[0];
+    if (!q || !Array.isArray(q.close) || ts.length < 100) continue;
+
+    const mapByDate = new Map<string, Bar>();
+    for (let i = 0; i < ts.length; i++) {
+      const c = q.close[i];
+      const o = q.open[i];
+      const h = q.high[i];
+      const l = q.low[i];
+      const v = q.volume[i];
+      if (c && Number(c) > 0 && h && l && v && Number(v) > 0) {
+        const tSec = Number(ts[i]);
+        const dt = new Date((tSec + 8 * 3600) * 1000);
+        const dKey = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(
+          2,
+          "0"
+        )}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+        mapByDate.set(dKey, {
+          time: tSec,
+          open: Number(o ?? c),
+          high: Number(h),
+          low: Number(l),
+          close: Number(c),
+          volume: Number(v),
+        });
+      }
+    }
+    dailyBars = Array.from(mapByDate.values());
+    if (dailyBars.length >= 100) {
+      usedSymbol = sym;
+      break;
+    }
+  }
+
+  if (dailyBars.length < 100) {
+    return { status: "error", message: `找不到股票代號 ${cleanId} 的足夠歷史日 K 資料` };
+  }
+
+  // 取得 HiStock 過去 1 年 (239 交易日) chip5, chip10, Volume
+  const pageToken = await fetchHiStockPageToken();
+  const chipByDate = new Map<string, { conc5d: number; conc10d: number }>();
+
+  if (pageToken) {
+    try {
+      const hUrl = `https://histock.tw/stock/chip/chartdata.aspx?no=${encodeURIComponent(
+        cleanId
+      )}&m=volume,chip5,chip10&p=${encodeURIComponent(pageToken)}`;
+      const hRes = await fetch(hUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          Referer: `https://histock.tw/stock/main.aspx?no=${cleanId}`,
+        },
+      });
+      if (hRes.ok) {
+        const hData = await hRes.json();
+        if (hData?.chip5 && hData?.chip10 && hData?.Volume) {
+          const c5Arr: Array<[number, number]> = JSON.parse(hData.chip5);
+          const c10Arr: Array<[number, number]> = JSON.parse(hData.chip10);
+          const vArr: Array<[number, number]> = JSON.parse(hData.Volume);
+          for (let i = 9; i < c5Arr.length; i++) {
+            const dt = new Date(Number(c5Arr[i][0]) + 8 * 3600_000);
+            const dStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(
+              2,
+              "0"
+            )}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+            const c5 = Number(c5Arr[i][1] || 0);
+            const c10 = i < c10Arr.length ? Number(c10Arr[i][1] || 0) : 0;
+            let v5 = 0;
+            for (let j = Math.max(0, i - 4); j <= i && j < vArr.length; j++) v5 += Number(vArr[j][1] || 0);
+            let v10 = 0;
+            for (let j = Math.max(0, i - 9); j <= i && j < vArr.length; j++) v10 += Number(vArr[j][1] || 0);
+            if (v5 > 0 && v10 > 0) {
+              chipByDate.set(dStr, {
+                conc5d: Number(((c5 / v5) * 100).toFixed(2)),
+                conc10d: Number(((c10 / v10) * 100).toFixed(2)),
+              });
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  const n = dailyBars.length;
+  const kArr = new Array<number>(n).fill(50);
+  const dArr = new Array<number>(n).fill(50);
+  const r6Arr = new Array<number>(n).fill(50);
+  const r12Arr = new Array<number>(n).fill(50);
+  const difArr = new Array<number>(n).fill(0);
+  const oscArr = new Array<number>(n).fill(0);
+
+  let kPrev = 50;
+  let dPrev = 50;
+  let ag6 = 0,
+    al6 = 0,
+    ag12 = 0,
+    al12 = 0;
+  let emaFast = dailyBars[0].close;
+  let emaSlow = dailyBars[0].close;
+  let dea = 0;
+
+  for (let i = 0; i < n; i++) {
+    const c = dailyBars[i].close;
+    if (i >= 8) {
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let j = i - 8; j <= i; j++) {
+        if (dailyBars[j].low < lo) lo = dailyBars[j].low;
+        if (dailyBars[j].high > hi) hi = dailyBars[j].high;
+      }
+      const rsv = hi > lo ? ((c - lo) / (hi - lo)) * 100 : 50;
+      kPrev = (2 / 3) * kPrev + (1 / 3) * rsv;
+      dPrev = (2 / 3) * dPrev + (1 / 3) * kPrev;
+    }
+    kArr[i] = kPrev;
+    dArr[i] = dPrev;
+
+    if (i > 0) {
+      const chg = c - dailyBars[i - 1].close;
+      const g = chg > 0 ? chg : 0;
+      const ls = chg < 0 ? -chg : 0;
+      if (i <= 6) {
+        ag6 += g / 6;
+        al6 += ls / 6;
+      } else {
+        ag6 = (ag6 * 5 + g) / 6;
+        al6 = (al6 * 5 + ls) / 6;
+      }
+      if (i <= 12) {
+        ag12 += g / 12;
+        al12 += ls / 12;
+      } else {
+        ag12 = (ag12 * 11 + g) / 12;
+        al12 = (al12 * 11 + ls) / 12;
+      }
+      r6Arr[i] = al6 === 0 ? 100 : 100 - 100 / (1 + ag6 / al6);
+      r12Arr[i] = al12 === 0 ? 100 : 100 - 100 / (1 + ag12 / al12);
+
+      emaFast = c * (2 / 13) + emaFast * (11 / 13);
+      emaSlow = c * (2 / 27) + emaSlow * (25 / 27);
+      const dif = emaFast - emaSlow;
+      dea = dif * (2 / 10) + dea * (8 / 10);
+      difArr[i] = dif;
+      oscArr[i] = dif - dea;
+    }
+  }
+
+  const startIdx = Math.max(60, n - 245);
+  const endIdx = n - 6; // 至少留 5 個交易日觀察後續表現
+  let lastSignalIdx = -10;
+  const trades: Array<Record<string, any>> = [];
+
+  for (let t = startIdx; t <= endIdx; t++) {
+    if (t - lastSignalIdx < 5) continue;
+
+    const dt = new Date((dailyBars[t].time + 8 * 3600) * 1000);
+    const dStr = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+
+    const chip = chipByDate.get(dStr);
+    if (!chip) continue;
+    if (chip.conc5d <= 0 && chip.conc10d <= 0) continue;
+
+    const kdPass =
+      (kArr[t] > dArr[t] && kArr[t - 1] <= dArr[t - 1]) ||
+      (kArr[t] > dArr[t] && kArr[t] - dArr[t] <= 4.5 && kArr[t] > kArr[t - 1] && kArr[t] < 80) ||
+      (kArr[t] <= dArr[t] && dArr[t] - kArr[t] <= 3.0 && kArr[t] > kArr[t - 1] && kArr[t] < 70);
+
+    const rsiPass =
+      (r6Arr[t] > r12Arr[t] && r6Arr[t - 1] <= r12Arr[t - 1]) ||
+      (r6Arr[t] > r12Arr[t] && r6Arr[t] - r12Arr[t] <= 5.0 && r6Arr[t] > r6Arr[t - 1] && r6Arr[t] < 80) ||
+      (r6Arr[t] <= r12Arr[t] && r12Arr[t] - r6Arr[t] <= 3.0 && r6Arr[t] > r6Arr[t - 1] && r6Arr[t] < 70);
+
+    const macdPass =
+      (oscArr[t] > 0 && oscArr[t - 1] <= 0) ||
+      (oscArr[t] > 0 && oscArr[t] > oscArr[t - 1] && difArr[t] > difArr[t - 1]) ||
+      (oscArr[t] < 0 &&
+        oscArr[t] > oscArr[t - 1] &&
+        oscArr[t - 1] > oscArr[t - 2] &&
+        Math.abs(oscArr[t]) < Math.abs(oscArr[t - 1]) * 0.85);
+
+    const techCount = (kdPass ? 1 : 0) + (rsiPass ? 1 : 0) + (macdPass ? 1 : 0);
+    if (techCount < 2) continue;
+
+    const subBars = dailyBars.slice(0, t + 1);
+    const sup = evaluateMultiTimeframeSupport(subBars);
+
+    let trackType = "";
+    if (techCount === 3 && sup.matched) {
+      trackType = "🔥支撐起漲共振";
+    } else if (techCount === 3) {
+      trackType = "🚀動能突破型";
+    } else if (sup.matched && techCount >= 2 && (chip.conc5d >= 3.0 || chip.conc10d >= 5.0)) {
+      trackType = "💎隱藏潛伏回測";
+    } else {
+      continue;
+    }
+
+    lastSignalIdx = t;
+    const entryPrice = dailyBars[t].close;
+    const idx5 = Math.min(n - 1, t + 5);
+    const idx10 = Math.min(n - 1, t + 10);
+    const idx20 = Math.min(n - 1, t + 20);
+
+    const ret5d = Number((((dailyBars[idx5].close - entryPrice) / entryPrice) * 100).toFixed(2));
+    const ret10d =
+      t + 10 < n
+        ? Number((((dailyBars[idx10].close - entryPrice) / entryPrice) * 100).toFixed(2))
+        : null;
+    const ret20d =
+      t + 20 < n
+        ? Number((((dailyBars[idx20].close - entryPrice) / entryPrice) * 100).toFixed(2))
+        : null;
+
+    let maxHigh = entryPrice;
+    for (let f = t + 1; f <= idx20; f++) {
+      if (dailyBars[f].high > maxHigh) maxHigh = dailyBars[f].high;
+    }
+    const maxGain20d = Number((((maxHigh - entryPrice) / entryPrice) * 100).toFixed(2));
+
+    trades.push({
+      date: dStr,
+      entryPrice: Number(entryPrice.toFixed(2)),
+      trackType,
+      supportLabels: sup.matchedLabels.slice(0, 3),
+      conc5d: chip.conc5d,
+      conc10d: chip.conc10d,
+      ret5d,
+      ret10d,
+      ret20d,
+      maxGain20d,
+    });
+  }
+
+  const total = trades.length;
+  const valid10 = trades.filter((x) => x.ret10d !== null);
+  const valid20 = trades.filter((x) => x.ret20d !== null);
+
+  const win5 = total > 0 ? Number(((trades.filter((x) => x.ret5d > 0).length / total) * 100).toFixed(1)) : 0;
+  const win10 =
+    valid10.length > 0
+      ? Number(((valid10.filter((x) => x.ret10d > 0).length / valid10.length) * 100).toFixed(1))
+      : 0;
+  const win20 =
+    valid20.length > 0
+      ? Number(((valid20.filter((x) => x.ret20d > 0).length / valid20.length) * 100).toFixed(1))
+      : 0;
+  const winMfe3 =
+    total > 0 ? Number(((trades.filter((x) => x.maxGain20d >= 3.0).length / total) * 100).toFixed(1)) : 0;
+  const avgMaxGain =
+    total > 0
+      ? Number((trades.reduce((s, x) => s + x.maxGain20d, 0) / total).toFixed(2))
+      : 0;
+
+  return {
+    status: "ok",
+    stockId: cleanId,
+    symbol: usedSymbol,
+    totalSignals: total,
+    winRate5d: win5,
+    winRate10d: win10,
+    winRate20d: win20,
+    winRateMfe3Pct: winMfe3,
+    avgMaxGain20d: avgMaxGain,
+    trades: trades.reverse(),
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
   const t0 = Date.now();
   try {
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action") || "";
+
+    // 支援輕量級 API 1：查詢已推薦股票之最新現價與推薦後實盤表現
+    if (action === "quotes") {
+      const symbolsParam = url.searchParams.get("symbols") || "";
+      const quotes = await handleLiveQuotes(symbolsParam);
+      return new Response(JSON.stringify({ status: "ok", quotes }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
+    // 支援輕量級 API 2：單一個股過去 1 年無未來函數歷史回測
+    if (action === "backtest") {
+      const stockId = url.searchParams.get("stock_id") || "2393";
+      const market = url.searchParams.get("market") || "TWSE";
+      const btResult = await handleSingleStockBacktest(stockId, market);
+      return new Response(JSON.stringify(btResult), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 200,
+      });
+    }
+
     const supabaseUrl = cleanEnv(Deno.env.get("SUPABASE_URL"));
     const supabaseServiceKey = cleanEnv(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
     const discordWebhookUrl =
@@ -1148,7 +1524,6 @@ Deno.serve(async (req) => {
       throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
     }
 
-    const url = new URL(req.url);
     const sessionParam = url.searchParams.get("session") || "auto";
 
     const taipeiDate = getTaipeiDateStr();
