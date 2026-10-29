@@ -1140,7 +1140,7 @@ async function handleLiveQuotes(symbolsParam: string): Promise<Record<string, an
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean)
-    .slice(0, 20);
+    .slice(0, 40);
 
   const out: Record<string, any> = {};
   await Promise.allSettled(
@@ -1603,7 +1603,21 @@ Deno.serve(async (req) => {
     }
 
     recommendations.sort((a, b) => b.total_score - a.total_score);
-    const topRecs = recommendations.slice(0, 10);
+
+    // 三種策略各取前 10 名 (最多共 30 檔)，存入資料庫供網頁自由切換「全分類 Top 10」或「各策略 Top 10」
+    const topResonance = recommendations
+      .filter((r) => r.raw_metrics?.trackType === "🔥支撐起漲共振")
+      .slice(0, 10);
+    const topPullback = recommendations
+      .filter((r) => r.raw_metrics?.trackType === "💎隱藏潛伏回測")
+      .slice(0, 10);
+    const topBreakout = recommendations
+      .filter((r) => r.raw_metrics?.trackType === "🚀動能突破型")
+      .slice(0, 10);
+
+    const topRecs = [...topResonance, ...topPullback, ...topBreakout].sort(
+      (a, b) => b.total_score - a.total_score
+    );
     const elapsedSec = Number(((Date.now() - t0) / 1000).toFixed(2));
 
     // 4. 寫入 Supabase 資料表 (先移除同日同場次的舊批次，避免殘留孤兒紀錄)
@@ -1695,7 +1709,7 @@ Deno.serve(async (req) => {
         };
       });
 
-      const headerMsg = `📊 **【台股選股 Top ${topRecs.length}】** \`${taipeiDate}\` (${sessionTitle})`;
+      const headerMsg = `📊 **【台股選股 Top ${embeds.length}】** \`${taipeiDate}\` (${sessionTitle})`;
 
       const dRes = await fetch(discordWebhookUrl, {
         method: "POST",

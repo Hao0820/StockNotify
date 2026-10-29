@@ -66,11 +66,20 @@
         </div>
       </div>
 
-      <!-- Controls: Date Selector, Backtest Modal & Manual Rescan -->
+      <!-- Controls: Date Selector, Strategy Selector, Backtest Modal & Manual Rescan -->
       <div class="flex flex-wrap items-center gap-2">
         <div class="relative">
           <select id="runSelector" class="bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-3 py-2 pr-8">
             <option value="">載入選股批次中...</option>
+          </select>
+        </div>
+        <div class="relative">
+          <select id="strategySelector" onchange="setFilter(this.value)" class="bg-gray-900 border border-blue-500/40 text-blue-300 text-sm font-medium rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-3 py-2 pr-8">
+            <option value="TOP10">🏆 全分類綜合 Top 10</option>
+            <option value="🔥支撐起漲共振">🔥 支撐起漲共振 (Top 10)</option>
+            <option value="💎隱藏潛伏回測">💎 隱藏潛伏回測 (Top 10)</option>
+            <option value="🚀動能突破型">🚀 動能突破型 (Top 10)</option>
+            <option value="ALL">📋 三策略全部展開</option>
           </select>
         </div>
         <button onclick="openBacktestModal()" class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg transition">
@@ -107,12 +116,13 @@
         <div id="statLivePerf" class="text-sm font-bold font-mono text-amber-300 mt-1.5">計算現價中...</div>
       </div>
       <div class="glass-card rounded-xl p-4 col-span-2 sm:col-span-1">
-        <div class="text-xs text-gray-400">雙軌型態篩選</div>
+        <div class="text-xs text-gray-400">策略分類快速切換</div>
         <div class="flex flex-wrap items-center gap-1 mt-1.5">
-          <button onclick="setFilter('ALL')" id="filter-ALL" class="filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium">全部</button>
+          <button onclick="setFilter('TOP10')" id="filter-TOP10" class="filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium">🏆Top 10</button>
           <button onclick="setFilter('🔥支撐起漲共振')" id="filter-🔥支撐起漲共振" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">🔥共振</button>
           <button onclick="setFilter('💎隱藏潛伏回測')" id="filter-💎隱藏潛伏回測" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">💎潛伏</button>
           <button onclick="setFilter('🚀動能突破型')" id="filter-🚀動能突破型" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">🚀突破</button>
+          <button onclick="setFilter('ALL')" id="filter-ALL" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">📋全部</button>
         </div>
       </div>
     </section>
@@ -285,7 +295,7 @@
     let liveQuotesMap = {};
     let currentRunDate = "";
     let runsMap = {};
-    let currentFilter = "ALL";
+    let currentFilter = "TOP10";
 
     const headers = {
       "apikey": SUPABASE_ANON_KEY,
@@ -293,8 +303,79 @@
       "Content-Type": "application/json"
     };
 
+    function getFilteredList() {
+      if (currentFilter === "TOP10") {
+        return allRecommendations.slice(0, 10);
+      }
+      if (currentFilter === "ALL") {
+        return allRecommendations;
+      }
+      return allRecommendations
+        .filter(r => (r.raw_metrics?.trackType || "") === currentFilter)
+        .slice(0, 10);
+    }
+
+    function updateFilterCountsAndStats() {
+      const cntRes = allRecommendations.filter(r => (r.raw_metrics?.trackType || "") === "🔥支撐起漲共振").length;
+      const cntPull = allRecommendations.filter(r => (r.raw_metrics?.trackType || "") === "💎隱藏潛伏回測").length;
+      const cntBrk = allRecommendations.filter(r => (r.raw_metrics?.trackType || "") === "🚀動能突破型").length;
+      const cntTop10 = Math.min(10, allRecommendations.length);
+
+      const sel = document.getElementById("strategySelector");
+      if (sel) {
+        sel.options[0].textContent = `🏆 全分類綜合 Top ${cntTop10}`;
+        sel.options[1].textContent = `🔥 支撐起漲共振 (${cntRes}檔)`;
+        sel.options[2].textContent = `💎 隱藏潛伏回測 (${cntPull}檔)`;
+        sel.options[3].textContent = `🚀 動能突破型 (${cntBrk}檔)`;
+        sel.options[4].textContent = `📋 三策略全部展開 (${allRecommendations.length}檔)`;
+      }
+
+      const btnRes = document.getElementById("filter-🔥支撐起漲共振");
+      const btnPull = document.getElementById("filter-💎隱藏潛伏回測");
+      const btnBrk = document.getElementById("filter-🚀動能突破型");
+      const btnAll = document.getElementById("filter-ALL");
+      if (btnRes) btnRes.textContent = `🔥共振(${cntRes})`;
+      if (btnPull) btnPull.textContent = `💎潛伏(${cntPull})`;
+      if (btnBrk) btnBrk.textContent = `🚀突破(${cntBrk})`;
+      if (btnAll) btnAll.textContent = `📋全部(${allRecommendations.length})`;
+
+      const filtered = getFilteredList();
+      document.getElementById("statMatched").textContent =
+        currentFilter === "TOP10"
+          ? `全分類 Top ${filtered.length}`
+          : currentFilter === "ALL"
+          ? `三策略共 ${filtered.length} 檔`
+          : `${filtered.length} 檔`;
+
+      // 更新當前分類下的實盤平均表現
+      if (Object.keys(liveQuotesMap).length > 0 && filtered.length > 0) {
+        let tracked = 0, wins = 0, sumRet = 0;
+        for (const r of filtered) {
+          const q = liveQuotesMap[r.stock_id];
+          if (!q || !q.latestPrice) continue;
+          const entry = Number(r.close_price);
+          if (entry <= 0) continue;
+          const ret = ((q.latestPrice - entry) / entry) * 100;
+          tracked++;
+          if (ret >= 0) wins++;
+          sumRet += ret;
+        }
+        if (tracked > 0) {
+          const avgRet = (sumRet / tracked).toFixed(2);
+          const winRate = Math.round((wins / tracked) * 100);
+          const sign = Number(avgRet) >= 0 ? "+" : "";
+          document.getElementById("statLivePerf").innerHTML =
+            `<span class="${Number(avgRet) >= 0 ? 'text-rose-400' : 'text-emerald-400'}">均 ${sign}${avgRet}%</span> <span class="text-xs text-gray-400">(不敗率 ${winRate}%)</span>`;
+        }
+      }
+    }
+
     function setFilter(filterVal) {
       currentFilter = filterVal;
+      const sel = document.getElementById("strategySelector");
+      if (sel && sel.value !== filterVal) {
+        sel.value = filterVal;
+      }
       document.querySelectorAll(".filter-btn").forEach(btn => {
         btn.className = "filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700";
       });
@@ -302,6 +383,7 @@
       if (activeBtn) {
         activeBtn.className = "filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium";
       }
+      updateFilterCountsAndStats();
       renderCards();
     }
 
@@ -339,7 +421,7 @@
           const labelSession = r.session_type === "morning_0800" ? "08:00 盤前" : (r.session_type === "intraday_1300" ? "13:00 盤中" : "即時掃描");
           const opt = document.createElement("option");
           opt.value = `${r.run_date}__${r.session_type}`;
-          opt.textContent = `${r.run_date} (${labelSession}) - Top ${ Math.min(10, r.total_matched) }`;
+          opt.textContent = `${r.run_date} (${labelSession})`;
           if (idx === 0) opt.selected = true;
           selector.appendChild(opt);
         });
@@ -371,14 +453,14 @@
         const queryFilter = runInfo && runInfo.id
           ? `run_id=eq.${encodeURIComponent(runInfo.id)}`
           : `run_date=eq.${encodeURIComponent(runDate)}&session_type=eq.${encodeURIComponent(sessionType)}`;
-        const url = `${SUPABASE_URL}/rest/v1/stock_recommendations?${queryFilter}&order=total_score.desc&limit=10`;
+        const url = `${SUPABASE_URL}/rest/v1/stock_recommendations?${queryFilter}&order=total_score.desc&limit=40`;
         const res = await fetch(url, { headers });
         const data = await res.json();
         allRecommendations = Array.isArray(data) ? data : [];
-        document.getElementById("statMatched").textContent = `Top ${allRecommendations.length} 檔`;
+        updateFilterCountsAndStats();
         renderCards();
 
-        // 非同步查詢這 10 檔股票的最新現價，計算「推薦後實盤表現」
+        // 非同步查詢這批股票的最新現價，計算「推薦後實盤表現」
         fetchLivePerformanceForCurrentBatch();
       } catch (e) {
         grid.innerHTML = `<div class="col-span-2 text-center text-red-400 py-12">載入資料失敗：${e.message}</div>`;
@@ -398,28 +480,7 @@
         if (!res.ok) return;
         const json = await res.json();
         liveQuotesMap = json.quotes || {};
-
-        let tracked = 0;
-        let wins = 0;
-        let sumRet = 0;
-        for (const r of allRecommendations) {
-          const q = liveQuotesMap[r.stock_id];
-          if (!q || !q.latestPrice) continue;
-          const entry = Number(r.close_price);
-          if (entry <= 0) continue;
-          const ret = ((q.latestPrice - entry) / entry) * 100;
-          tracked++;
-          if (ret >= 0) wins++;
-          sumRet += ret;
-        }
-
-        if (tracked > 0) {
-          const avgRet = (sumRet / tracked).toFixed(2);
-          const winRate = Math.round((wins / tracked) * 100);
-          const sign = Number(avgRet) >= 0 ? "+" : "";
-          document.getElementById("statLivePerf").innerHTML =
-            `<span class="${Number(avgRet) >= 0 ? 'text-rose-400' : 'text-emerald-400'}">均 ${sign}${avgRet}%</span> <span class="text-xs text-gray-400">(不敗率 ${winRate}%)</span>`;
-        }
+        updateFilterCountsAndStats();
         renderCards();
       } catch (_) {
         document.getElementById("statLivePerf").textContent = "已同步當日收盤";
@@ -428,9 +489,7 @@
 
     function renderCards() {
       const grid = document.getElementById("cardsGrid");
-      const filtered = currentFilter === "ALL"
-        ? allRecommendations
-        : allRecommendations.filter(r => (r.raw_metrics?.trackType || "") === currentFilter);
+      const filtered = getFilteredList();
 
       if (filtered.length === 0) {
         grid.innerHTML = `<div class="col-span-2 glass-card rounded-2xl p-12 text-center text-gray-400">目前分類下無符合條件之股票</div>`;
@@ -460,7 +519,7 @@
           ? "bg-blue-500/15 text-blue-300 border-blue-500/30"
           : "bg-amber-500/15 text-amber-300 border-amber-500/30";
 
-        const rankNum = allRecommendations.indexOf(r) + 1 || (idx + 1);
+        const rankNum = idx + 1;
         const yahooUrl = `https://tw.stock.yahoo.com/quote/${r.stock_id}.${r.market === "TWSE" ? "TW" : "TWO"}`;
         const fStreakHtml = fStreak > 0 ? `<span class="text-[11px] text-amber-400 ml-1">(連${fStreak})</span>` : "";
         const tStreakHtml = tStreak > 0 ? `<span class="text-[11px] text-amber-400 ml-1">(連${tStreak})</span>` : "";
