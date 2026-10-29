@@ -1,0 +1,8 @@
+{
+  "name": "stock-notify-web",
+  "version": "1.0.0",
+  "description": "StockNotify 台股隱藏飆股雙軌雷達前端看板 (Vercel + Supabase)",
+  "scripts": {
+    "start": "npx serve ."
+  }
+}

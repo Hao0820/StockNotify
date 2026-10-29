@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockNotify ｜ 台股隱藏飆股雙軌雷達</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'Noto Sans TC', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            bg: '#090D16',
+            card: '#111827',
+            border: '#1F2937',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #090D16;
+      color: #F3F4F6;
+      background-image: radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.12), transparent 50%);
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.82);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card:hover {
+      border-color: rgba(59, 130, 246, 0.4);
+    }
+  </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-blue-500 selection:text-white">
+
+  <!-- Top Navigation / Header -->
+  <header class="border-b border-gray-800/80 bg-[#090D16]/90 sticky top-0 z-30 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-xl font-bold tracking-tight text-white">StockNotify 隱藏飆股雷達</h1>
+            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
+              週一至五 08:00 推播
+            </span>
+          </div>
+          <p class="text-xs text-gray-400 mt-0.5">
+            多週期 12EMA & 布林(21, 2.1) 支撐 ＋ KD / RSI / MACD 轉強 ＋ 5日/10日主力與 400張大戶集中度
+          </p>
+        </div>
+      </div>
+
+      <!-- Controls: Date Selector & Manual Rescan -->
+      <div class="flex items-center gap-2.5">
+        <div class="relative">
+          <select id="runSelector" class="bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block px-3 py-2 pr-8">
+            <option value="">載入選股批次中...</option>
+          </select>
+        </div>
+        <button id="refreshBtn" onclick="triggerLiveScan()" class="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-lg transition shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg id="refreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+          <span id="refreshText">立即重新掃描</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- Summary Metrics Bar -->
+    <section class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-gray-400">選股日期</div>
+        <div id="statDate" class="text-lg sm:text-xl font-bold font-mono text-white mt-1">--</div>
+      </div>
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-gray-400">全市場掃描檔數</div>
+        <div id="statScanned" class="text-lg sm:text-xl font-bold font-mono text-blue-400 mt-1">--</div>
+      </div>
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-gray-400">當日嚴選推薦</div>
+        <div id="statMatched" class="text-lg sm:text-xl font-bold font-mono text-emerald-400 mt-1">--</div>
+      </div>
+      <div class="glass-card rounded-xl p-4">
+        <div class="text-xs text-gray-400">雙軌型態篩選</div>
+        <div class="flex items-center gap-1.5 mt-1.5">
+          <button onclick="setFilter('ALL')" id="filter-ALL" class="filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium">全部</button>
+          <button onclick="setFilter('🔥支撐起漲共振')" id="filter-🔥支撐起漲共振" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">🔥共振</button>
+          <button onclick="setFilter('💎隱藏潛伏回測')" id="filter-💎隱藏潛伏回測" class="filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700">💎潛伏</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Status Banner -->
+    <div id="statusBanner" class="hidden rounded-xl bg-blue-500/10 border border-blue-500/30 px-4 py-3 text-sm text-blue-300 flex items-center gap-3">
+      <svg class="w-5 h-5 animate-spin text-blue-400 shrink-0" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span id="statusBannerText">正在掃描全市場 1,950+ 檔股票並計算 5日/10日主力集中度與日/週/月支撐，約需 25~35 秒...</span>
+    </div>
+
+    <!-- Top 10 Stock Cards Grid -->
+    <section id="cardsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Skeletons while loading -->
+      <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
+      <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
+      <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
+      <div class="glass-card rounded-2xl p-6 animate-pulse h-56"></div>
+    </section>
+
+  </main>
+
+  <footer class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-xs text-gray-500 border-t border-gray-800/60 mt-10">
+    StockNotify • Powered by Supabase Edge Functions + Yahoo Finance + TWSE/TPEx/TDCC OpenData
+  </footer>
+
+  <script>
+    const SUPABASE_URL = "https://mmvwmhopreouirgvlynm.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_tqhgtF9dUYLnDcd02v3PAw_8Td_NpO9";
+
+    let allRecommendations = [];
+    let runsMap = {};
+    let currentFilter = "ALL";
+
+    const headers = {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json"
+    };
+
+    function setFilter(filterVal) {
+      currentFilter = filterVal;
+      document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.className = "filter-btn px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 hover:bg-gray-700";
+      });
+      const activeBtn = document.getElementById(`filter-${filterVal}`);
+      if (activeBtn) {
+        activeBtn.className = "filter-btn px-2 py-0.5 text-xs rounded bg-blue-600 text-white font-medium";
+      }
+      renderCards();
+    }
+
+    async function loadRunsAndLatestData() {
+      try {
+        // 1. 取得最近 20 次選股執行紀錄
+        const runsRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/screening_runs?select=id,run_date,session_type,total_scanned,total_matched,execution_time_sec,created_at&order=created_at.desc&limit=20`,
+          { headers }
+        );
+        const runs = await runsRes.json();
+
+        const selector = document.getElementById("runSelector");
+        selector.innerHTML = "";
+
+        // 以 (run_date + session_type) 去重，保留最新一筆
+        const seenKeys = new Set();
+        const uniqueRuns = [];
+        for (const r of runs) {
+          const key = `${r.run_date}__${r.session_type}`;
+          if (!seenKeys.has(key) && r.total_matched > 0) {
+            seenKeys.add(key);
+            uniqueRuns.push(r);
+            runsMap[key] = r;
+          }
+        }
+
+        if (uniqueRuns.length === 0 && runs.length > 0) {
+          const r = runs[0];
+          const key = `${r.run_date}__${r.session_type}`;
+          uniqueRuns.push(r);
+          runsMap[key] = r;
+        }
+
+        uniqueRuns.forEach((r, idx) => {
+          const labelSession = r.session_type === "morning_0800" ? "08:00 盤前" : (r.session_type === "intraday_1300" ? "13:00 盤中" : "即時掃描");
+          const opt = document.createElement("option");
+          opt.value = `${r.run_date}__${r.session_type}`;
+          opt.textContent = `${r.run_date} (${labelSession}) - Top ${ Math.min(10, r.total_matched) }`;
+          if (idx === 0) opt.selected = true;
+          selector.appendChild(opt);
+        });
+
+        selector.onchange = () => {
+          const [d, s] = selector.value.split("__");
+          loadRecommendationsByBatch(d, s);
+        };
+
+        if (uniqueRuns.length > 0) {
+          await loadRecommendationsByBatch(uniqueRuns[0].run_date, uniqueRuns[0].session_type);
+        }
+      } catch (err) {
+        console.error("Failed to load runs:", err);
+      }
+    }
+
+    async function loadRecommendationsByBatch(runDate, sessionType) {
+      const grid = document.getElementById("cardsGrid");
+      const key = `${runDate}__${sessionType}`;
+      const runInfo = runsMap[key];
+
+      document.getElementById("statDate").textContent = runDate;
+      document.getElementById("statScanned").textContent = runInfo ? `${runInfo.total_scanned.toLocaleString()} 檔` : "1,956 檔";
+
+      try {
+        const queryFilter = runInfo && runInfo.id
+          ? `run_id=eq.${encodeURIComponent(runInfo.id)}`
+          : `run_date=eq.${encodeURIComponent(runDate)}&session_type=eq.${encodeURIComponent(sessionType)}`;
+        const url = `${SUPABASE_URL}/rest/v1/stock_recommendations?${queryFilter}&order=total_score.desc&limit=10`;
+        const res = await fetch(url, { headers });
+        const data = await res.json();
+        allRecommendations = Array.isArray(data) ? data : [];
+        document.getElementById("statMatched").textContent = `Top ${allRecommendations.length} 檔`;
+        renderCards();
+      } catch (e) {
+        grid.innerHTML = `<div class="col-span-2 text-center text-red-400 py-12">載入資料失敗：${e.message}</div>`;
+      }
+    }
+
+    function renderCards() {
+      const grid = document.getElementById("cardsGrid");
+      const filtered = currentFilter === "ALL"
+        ? allRecommendations
+        : allRecommendations.filter(r => (r.raw_metrics?.trackType || "") === currentFilter);
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `<div class="col-span-2 glass-card rounded-2xl p-12 text-center text-gray-400">目前分類下無符合條件之股票</div>`;
+        return;
+      }
+
+      grid.innerHTML = filtered.map((r, idx) => {
+        const rm = r.raw_metrics || {};
+        const sb = rm.scoreBreakdown || {};
+        const trackBadge = rm.trackType || "精選標的";
+        const supportList = rm.supportMatched || [];
+        const conc5d = rm.conc5dPct ?? r.inst_concentration_pct ?? 0;
+        const conc10d = rm.conc10dPct ?? 0;
+        const f5d = rm.foreign5dLots ?? r.foreign_net_lots ?? 0;
+        const t5d = rm.trust5dLots ?? r.trust_net_lots ?? 0;
+        const fStreak = rm.foreignStreak || 0;
+        const tStreak = rm.trustStreak || 0;
+
+        const isUp = Number(r.price_change_pct) > 0;
+        const isDown = Number(r.price_change_pct) < 0;
+        const priceColor = isUp ? "text-rose-400" : (isDown ? "text-emerald-400" : "text-gray-200");
+        const priceBg = isUp ? "bg-rose-500/15 border-rose-500/30 text-rose-300" : (isDown ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300" : "bg-gray-700/40 border-gray-600 text-gray-300");
+
+        const badgeStyle = trackBadge.includes("共振")
+          ? "bg-rose-500/15 text-rose-300 border-rose-500/30"
+          : "bg-amber-500/15 text-amber-300 border-amber-500/30";
+
+        const yahooUrl = `https://tw.stock.yahoo.com/quote/${r.stock_id}.${r.market === "TWSE" ? "TW" : "TWO"}`;
+        const fStreakHtml = fStreak > 0 ? `<span class="text-[11px] text-amber-400 ml-1">(連${fStreak})</span>` : "";
+        const tStreakHtml = tStreak > 0 ? `<span class="text-[11px] text-amber-400 ml-1">(連${tStreak})</span>` : "";
+
+        const supportTagsHtml = supportList.length > 0
+          ? supportList.map(s => `<span class="px-2 py-0.5 text-xs rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">${s}</span>`).join("")
+          : `<span class="px-2 py-0.5 text-xs rounded-md bg-gray-800 text-gray-400">動能突破</span>`;
+
+        return `
+          <div class="glass-card rounded-2xl p-5 transition duration-200 flex flex-col justify-between space-y-4">
+            <!-- Card Header -->
+            <div>
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2.5">
+                  <span class="w-7 h-7 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center font-mono text-xs font-bold text-gray-300">
+                    #${idx + 1}
+                  </span>
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <a href="${yahooUrl}" target="_blank" rel="noopener" class="text-lg font-bold text-white hover:text-blue-400 transition flex items-center gap-1.5">
+                        <span class="font-mono">${r.stock_id}</span>
+                        <span>${r.stock_name}</span>
+                        <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                      </a>
+                      <span class="text-[11px] px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">${r.market === "TWSE" ? "上市" : "上櫃"}</span>
+                    </div>
+                    <div class="mt-1 flex items-center gap-2">
+                      <span class="text-xs px-2 py-0.5 rounded-full border ${badgeStyle} font-medium">${trackBadge}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right: Price & Total Score -->
+                <div class="text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <span class="text-xl font-bold font-mono ${priceColor}">${Number(r.close_price).toFixed(2)}</span>
+                    <span class="text-xs font-mono px-1.5 py-0.5 rounded border ${priceBg}">
+                      ${Number(r.price_change_pct) >= 0 ? "+" : ""}${Number(r.price_change_pct).toFixed(2)}%
+                    </span>
+                  </div>
+                  <div class="text-xs text-gray-400 mt-1 font-mono">
+                    成交量 ${Number(r.volume_lots).toLocaleString()} 張
+                  </div>
+                </div>
+              </div>
+
+              <!-- Support Tags (12EMA & Bollinger 21, 2.1) -->
+              <div class="mt-3.5">
+                <div class="text-[11px] text-gray-400 mb-1.5">🎯 12EMA / 布林(21, 2.1) 支撐位階：</div>
+                <div class="flex flex-wrap gap-1.5">
+                  ${supportTagsHtml}
+                </div>
+              </div>
+
+              <!-- Metrics Grid: Concentration + Chips + Technicals -->
+              <div class="grid grid-cols-3 gap-2.5 mt-4 pt-3.5 border-t border-gray-800/80 text-xs">
+                <div class="bg-gray-900/70 rounded-xl p-2.5 border border-gray-800/80">
+                  <div class="text-gray-400 text-[11px]">🏦 籌碼集中度</div>
+                  <div class="mt-1 font-mono">
+                    5日: <span class="${conc5d >= 0 ? 'text-rose-400 font-semibold' : 'text-emerald-400'}">${conc5d >= 0 ? '+' : ''}${conc5d}%</span>
+                  </div>
+                  <div class="font-mono mt-0.5">
+                    10日: <span class="${conc10d >= 0 ? 'text-rose-400 font-semibold' : 'text-emerald-400'}">${conc10d >= 0 ? '+' : ''}${conc10d}%</span>
+                  </div>
+                </div>
+
+                <div class="bg-gray-900/70 rounded-xl p-2.5 border border-gray-800/80">
+                  <div class="text-gray-400 text-[11px]">🤝 法人5日 & 大戶</div>
+                  <div class="mt-1 font-mono truncate">
+                    外資: <span class="${f5d >= 0 ? 'text-rose-400' : 'text-emerald-400'}">${f5d >= 0 ? '+' : ''}${f5d}張</span>${fStreakHtml}
+                  </div>
+                  <div class="font-mono mt-0.5 truncate">
+                    投信: <span class="${t5d >= 0 ? 'text-rose-400' : 'text-emerald-400'}">${t5d >= 0 ? '+' : ''}${t5d}張</span>${tStreakHtml}
+                  </div>
+                  <div class="font-mono mt-0.5 text-amber-300">
+                    400張大戶: ${Number(r.major_holder_400_pct).toFixed(1)}%
+                  </div>
+                </div>
+
+                <div class="bg-gray-900/70 rounded-xl p-2.5 border border-gray-800/80">
+                  <div class="text-gray-400 text-[11px]">📈 技術動能</div>
+                  <div class="mt-1 font-mono">
+                    KD: <span class="text-gray-200">${Number(r.k_value).toFixed(1)} / ${Number(r.d_value).toFixed(1)}</span>
+                  </div>
+                  <div class="font-mono mt-0.5">
+                    RSI: <span class="text-gray-200">${Number(r.rsi_6).toFixed(1)} / ${Number(r.rsi_12).toFixed(1)}</span>
+                  </div>
+                  <div class="font-mono mt-0.5">
+                    MACD柱: <span class="${Number(r.macd_hist) >= 0 ? 'text-rose-400' : 'text-blue-400'}">${Number(r.macd_hist).toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer Score Bar -->
+            <div class="pt-3 border-t border-gray-800/80 flex items-center justify-between text-xs">
+              <div class="flex items-center gap-3 text-gray-400 font-mono">
+                <span>籌碼 <b class="text-gray-200">${sb.chipScore || 0}</b>/35</span>
+                <span>支撐 <b class="text-gray-200">${sb.supportScore || 0}</b>/35</span>
+                <span>動能 <b class="text-gray-200">${sb.techScore || 0}</b>/30</span>
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-gray-400">總分</span>
+                <span class="px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-mono font-bold text-sm">
+                  ${r.total_score}
+                </span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function triggerLiveScan() {
+      const btn = document.getElementById("refreshBtn");
+      const icon = document.getElementById("refreshIcon");
+      const text = document.getElementById("refreshText");
+      const banner = document.getElementById("statusBanner");
+
+      btn.disabled = true;
+      icon.classList.add("animate-spin");
+      text.textContent = "掃描中...";
+      banner.classList.remove("hidden");
+
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/stock-screener?session=manual`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        });
+        if (res.ok) {
+          await loadRunsAndLatestData();
+        } else {
+          alert("掃描執行失敗，請稍後再試");
+        }
+      } catch (e) {
+        alert("連線錯誤：" + e.message);
+      } finally {
+        btn.disabled = false;
+        icon.classList.remove("animate-spin");
+        text.textContent = "立即重新掃描";
+        banner.classList.add("hidden");
+      }
+    }
+
+    loadRunsAndLatestData();
+  </script>
+</body>
+</html>
