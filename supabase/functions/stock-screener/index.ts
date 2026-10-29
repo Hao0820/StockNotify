@@ -1431,8 +1431,12 @@ async function handleSingleStockBacktest(stockId: string, marketHint = "TWSE"): 
         : null;
 
     let maxHigh = entryPrice;
+    let peakDay = 1;
     for (let f = t + 1; f <= idx20; f++) {
-      if (dailyBars[f].high > maxHigh) maxHigh = dailyBars[f].high;
+      if (dailyBars[f].high > maxHigh) {
+        maxHigh = dailyBars[f].high;
+        peakDay = f - t;
+      }
     }
     const maxGain20d = Number((((maxHigh - entryPrice) / entryPrice) * 100).toFixed(2));
 
@@ -1447,6 +1451,7 @@ async function handleSingleStockBacktest(stockId: string, marketHint = "TWSE"): 
       ret10d,
       ret20d,
       maxGain20d,
+      peakDay,
     });
   }
 
@@ -1469,6 +1474,10 @@ async function handleSingleStockBacktest(stockId: string, marketHint = "TWSE"): 
     total > 0
       ? Number((trades.reduce((s, x) => s + x.maxGain20d, 0) / total).toFixed(2))
       : 0;
+  const avgPeakDay =
+    total > 0
+      ? Number((trades.reduce((s, x) => s + (x.peakDay || 10), 0) / total).toFixed(1))
+      : 11;
 
   return {
     status: "ok",
@@ -1480,6 +1489,7 @@ async function handleSingleStockBacktest(stockId: string, marketHint = "TWSE"): 
     winRate20d: win20,
     winRateMfe3Pct: winMfe3,
     avgMaxGain20d: avgMaxGain,
+    avgPeakDay,
     trades: trades.reverse(),
   };
 }
