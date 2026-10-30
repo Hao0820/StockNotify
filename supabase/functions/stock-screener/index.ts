@@ -152,9 +152,24 @@ function parseNum(val: unknown): number {
   return isNaN(n) ? 0 : n;
 }
 
-function getRecentWeekdayDates(count = 15): Array<{ yyyymmdd: string; rocDate: string }> {
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = 6000
+): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+function getRecentWeekdayDates(count = 12): Array<{ yyyymmdd: string; rocDate: string }> {
   const list: Array<{ yyyymmdd: string; rocDate: string }> = [];
-  let offset = 0;
+  // 下午 15:00 前當日三大法人尚未公布，直接從前一個交易日 (offset=1) 開始抓，避免浪費請求
+  let offset = getTaipeiHour() < 15 ? 1 : 0;
   while (list.length < count && offset < 30) {
     const dt = new Date(Date.now() + 8 * 3600_000 - offset * 86400_000);
     const dayOfWeek = dt.getUTCDay();
@@ -178,9 +193,11 @@ function getRecentWeekdayDates(count = 15): Array<{ yyyymmdd: string; rocDate: s
  */
 async function fetchHiStockPageToken(): Promise<string> {
   try {
-    const res = await fetch("https://histock.tw/stock/main.aspx?no=2330", {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-    });
+    const res = await fetchWithTimeout(
+      "https://histock.tw/stock/main.aspx?no=2330",
+      { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } },
+      6000
+    );
     if (!res.ok) return "";
     const html = await res.text();
     const m = html.match(/HiChartPageToken\s*=\s*"([^"]+)"/);
@@ -205,12 +222,16 @@ async function fetchTop15BrokerConcentration(
     const url = `https://histock.tw/stock/chip/chartdata.aspx?no=${encodeURIComponent(
       stockId
     )}&m=volume,chip5,chip10&p=${encodeURIComponent(pageToken)}`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        Referer: `https://histock.tw/stock/main.aspx?no=${stockId}`,
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          Referer: `https://histock.tw/stock/main.aspx?no=${stockId}`,
+        },
       },
-    });
+      5000
+    );
     if (!res.ok) return null;
     const data = await res.json();
     if (!data || data.Error || !data.chip5 || !data.chip10 || !data.Volume) {
@@ -275,8 +296,8 @@ async function fetchAllTaiwanOrdinaryStocks(): Promise<StockBasic[]> {
   const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
 
   const [twseRes, tpexRes] = await Promise.allSettled([
-    fetch("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", { headers }),
-    fetch("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", { headers }),
+    fetchWithTimeout("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", { headers }, 8000),
+    fetchWithTimeout("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", { headers }, 4000),
   ]);
 
   if (twseRes.status === "fulfilled" && twseRes.value.ok) {
@@ -338,13 +359,13 @@ async function fetchAllTaiwanOrdinaryStocks(): Promise<StockBasic[]> {
  * 2. 平行抓取最近 10 個交易日「證交所 T86」與「櫃買中心」三大法人買賣超
  */
 async function fetch10DayInstitutionalChips(): Promise<Map<string, MultiDayInstChip>> {
-  const candidateDates = getRecentWeekdayDates(15);
+  const candidateDates = getRecentWeekdayDates(12);
   const headers = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" };
 
   const twsePromises = candidateDates.map(async (d) => {
     try {
       const url = `https://www.twse.com.tw/rwd/zh/fund/T86?date=${d.yyyymmdd}&selectType=ALLBUT0999&response=json`;
-      const res = await fetch(url, { headers });
+      const res = await fetchWithTimeout(url, { headers }, 5500);
       if (!res.ok) return null;
       const json = await res.json();
       if (json.stat === "OK" && Array.isArray(json.data) && json.data.length > 100) {
@@ -363,7 +384,7 @@ async function fetch10DayInstitutionalChips(): Promise<Map<string, MultiDayInstC
         return { dateStr: d.yyyymmdd, dayMap };
       }
     } catch (_) {
-      // ignore
+      // ignore timeout or network error
     }
     return null;
   });
@@ -371,7 +392,7 @@ async function fetch10DayInstitutionalChips(): Promise<Map<string, MultiDayInstC
   const tpexPromises = candidateDates.map(async (d) => {
     try {
       const url = `https://www.tpex.org.tw/web/stock/3insti/daily_trade/3itrade_hedge_result.php?l=zh-tw&se=EW&t=D&d=${d.rocDate}&o=json`;
-      const res = await fetch(url, { headers });
+      const res = await fetchWithTimeout(url, { headers }, 3500);
       if (!res.ok) return null;
       const json = await res.json();
       const rows = json.aaData || json.tables?.[0]?.data || [];
@@ -472,9 +493,11 @@ async function fetch10DayInstitutionalChips(): Promise<Map<string, MultiDayInstC
 async function fetchTdccHoldings(): Promise<Map<string, TdccHolding>> {
   const tdccMap = new Map<string, TdccHolding>();
   try {
-    const res = await fetch("https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5", {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
+    const res = await fetchWithTimeout(
+      "https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5",
+      { headers: { "User-Agent": "Mozilla/5.0" } },
+      8000
+    );
     if (!res.ok) return tdccMap;
     const text = await res.text();
     const lines = text.split(/\r?\n/);
@@ -734,9 +757,16 @@ async function fetchAndEvaluateYahooStock(
     symbol
   )}?range=2y&interval=1d`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-  });
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      url,
+      { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } },
+      6000
+    );
+  } catch (_) {
+    return { passed: false } as FullStockEvaluation;
+  }
   if (!res.ok) return { passed: false } as FullStockEvaluation;
 
   const json = await res.json();
